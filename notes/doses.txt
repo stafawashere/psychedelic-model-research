@@ -1,0 +1,5 @@
+Dose: 0.00, Knobs: Knobs(scene_precision=0.15, prior_precision=7.5, gain=1.0, depth=0, recurrence=0.0)
+Dose: 0.25, Knobs: Knobs(scene_precision=0.32499999999999996, prior_precision=5.875, gain=1.375, depth=1, recurrence=0.15)
+Dose: 0.50, Knobs: Knobs(scene_precision=0.5, prior_precision=4.25, gain=1.75, depth=2, recurrence=0.3)
+Dose: 0.75, Knobs: Knobs(scene_precision=0.6749999999999999, prior_precision=2.625, gain=2.125, depth=2, recurrence=0.44999999999999996)
+Dose: 1.00, Knobs: Knobs(scene_precision=0.85, prior_precision=1.0, gain=2.5, depth=3, recurrence=0.6)
