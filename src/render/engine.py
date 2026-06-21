@@ -1,12 +1,12 @@
 from __future__ import annotations
 import re
 import warnings
-import hooks
+from . import hooks
 import numpy as np
 import torch
 from PIL import Image
 from diffusers import DDIMScheduler, StableDiffusionPipeline
-from knobs import Knobs
+from ..core.knobs import Knobs
 
 
 _DATATYPES = {
@@ -40,19 +40,20 @@ BIASED_WORDS = frozenset(
 
 
 def _empty_cache(device) -> None:
-    """Return cached-but-unused blocks to the MPS allocator (no-op off MPS)."""
     name = getattr(device, "type", None) or str(device)
     if name == "mps" and torch.backends.mps.is_available():
         torch.mps.empty_cache()
 
 
-def _compute_dtype(pipe) -> torch.dtype:
-    """Dtype the diffusion loop runs in (the UNet's) — bf16 on a memory-tight box."""
+def _to_device(module: torch.nn.Module, device: str) -> None:
+    module.to(device)
+
+
+def _compute_dtype(pipe: StableDiffusionPipeline) -> torch.dtype:
     return next(pipe.unet.parameters()).dtype
 
 
-def _vae_dtype(pipe) -> torch.dtype:
-    """Dtype the VAE runs in; kept fp32 so half-precision frames don't decode to black."""
+def _vae_dtype(pipe: StableDiffusionPipeline) -> torch.dtype:
     return next(pipe.vae.parameters()).dtype
 
 
@@ -103,10 +104,11 @@ def caption_scene(scene_path: str) -> str:
     processor = BlipProcessor.from_pretrained(BLIP_MODEL)
     model = BlipForConditionalGeneration.from_pretrained(
         BLIP_MODEL, torch_dtype=torch.float32
-    ).to(device)
+    )
+    _to_device(model, device)
 
     image = Image.open(scene_path).convert("RGB")
-    inputs = processor(image, return_tensors="pt").to(device)
+    inputs = processor(images=image).convert_to_tensors("pt").to(device)
     with torch.no_grad():
         out = model.generate(**inputs, max_new_tokens=30)
 
@@ -117,6 +119,9 @@ def caption_scene(scene_path: str) -> str:
     return _strip_bias(caption)
 
 
+# process (pre) the pill (image) then downscale and encode the tensor for the latent then run thru denoise loop, latent blend (bleed), then the hooks (gain)
+# then decode and unscale the modified latent and process (post) the tensor into a pill (image)
+
 # preprocess pil then encode tensor for latent
 def _preprocess(image: Image.Image, size: tuple[int, int]) -> torch.Tensor: # preprocess pil image into tensor
     image = image.convert("RGB").resize(size, Image.Resampling.LANCZOS)
@@ -124,13 +129,13 @@ def _preprocess(image: Image.Image, size: tuple[int, int]) -> torch.Tensor: # pr
     t = torch.from_numpy(arr).permute(2, 0, 1).unsqueeze(0)
     return t * 2.0 - 1.0
 
-def _encode(pipe, image_t: torch.Tensor, generator: torch.Generator) -> torch.Tensor: # encode tensor into latent
+def _encode(pipe: StableDiffusionPipeline, image_t: torch.Tensor, generator: torch.Generator) -> torch.Tensor: # encode tensor into latent
     device = getattr(pipe, "device", torch.device("cpu"))
-    image_t = image_t.to(device=device, dtype=_vae_dtype(pipe)) # match the fp32 VAE
+    image_t = image_t.to(device=device, dtype=_vae_dtype(pipe))
     latent_dist = pipe.vae.encode(image_t).latent_dist
     z = latent_dist.sample(generator=generator)
     z = z * pipe.vae.config.scaling_factor
-    return z.to(_compute_dtype(pipe)) # hand the latent back in the loop's dtype (bf16)
+    return z.to(_compute_dtype(pipe))
 
 # decode latent then postprocess tensor into pil
 def _postprocess(sample: torch.Tensor) -> Image.Image: # postprocess tensor into pil
@@ -138,14 +143,13 @@ def _postprocess(sample: torch.Tensor) -> Image.Image: # postprocess tensor into
     arr = sample.squeeze(0).permute(1, 2, 0).float().cpu().numpy()
     return Image.fromarray((arr * 255.0).round().astype(np.uint8))
 
-def _decode(pipe, latents: torch.Tensor) -> torch.Tensor: # decode latent into tensor
+def _decode(pipe: StableDiffusionPipeline, latents: torch.Tensor) -> torch.Tensor: # decode latent into tensor
     latents = latents.to(_vae_dtype(pipe)) / pipe.vae.config.scaling_factor
     return pipe.vae.decode(latents).sample
 
-
 @torch.no_grad()
 def render_frame(
-    pipe,
+    pipe: StableDiffusionPipeline,
     x_scene: Image.Image,
     prev_frame: Image.Image,
     caption: str,
@@ -174,23 +178,22 @@ def render_frame(
         scaled_prev = prev_weight * prev_latent
         blended_latent = (scaled_scene + scaled_prev) / total_weight
 
-    # the pixel tensors and source latents are consumed; release the VAE-encode
-    # scratch before the denoise loop so it starts with the most free memory.
     del scene_pixels, prev_pixels, scene_latent, prev_latent
     _empty_cache(device)
 
     denoise_strength = min(0.85, max(0.2, 0.2 + knobs.recurrence))
-
     pipe.scheduler.set_timesteps(steps, device=device)
+
     active_step_count = min(round(steps * denoise_strength), steps)
     first_step_index = max(steps - active_step_count, 0)
     denoise_timesteps = pipe.scheduler.timesteps[first_step_index:]
-    if len(denoise_timesteps) == 0:
+    completed_denoise = len(denoise_timesteps)
+    if completed_denoise == 0:
         denoise_timesteps = pipe.scheduler.timesteps[-1:]
 
     initial_noise = torch.randn(blended_latent.shape, generator=rng, dtype=blended_latent.dtype)
     initial_noise = initial_noise.to(device)
-    latents = pipe.scheduler.add_noise(blended_latent, initial_noise, denoise_timesteps[:1])
+    latent = pipe.scheduler.add_noise(blended_latent, initial_noise, denoise_timesteps[:1]) # add noise ontop of the blended latent (previous + current scene) to create initial latent
 
     guidance_scale = knobs.prior_precision
     use_guidance = guidance_scale > 1.0
@@ -211,26 +214,22 @@ def render_frame(
 
     try:
         for timestep in denoise_timesteps:
-            unet_input = torch.cat([latents] * 2) if use_guidance else latents # cond + uncond
+            unet_input = torch.cat([latent] * 2) if use_guidance else latent
             unet_input = pipe.scheduler.scale_model_input(unet_input, timestep)
-            noise_prediction = pipe.unet(
-                unet_input, timestep, encoder_hidden_states=text_embeddings
-            ).sample
+            noise_prediction = pipe.unet(unet_input, timestep, encoder_hidden_states=text_embeddings).sample # predict noise (hooks take effect here)
 
             if use_guidance:
                 unconditional_pred, conditional_pred = noise_prediction.chunk(2)
                 guidance_direction = conditional_pred - unconditional_pred
                 noise_prediction = unconditional_pred + guidance_scale * guidance_direction # base + distance * direction
                 
-            latents = pipe.scheduler.step(
-                noise_prediction, timestep, latents, generator=rng
-            ).prev_sample
-            latents = torch.nan_to_num(latents, nan=0.0, posinf=4.0, neginf=-4.0) 
+            latent = pipe.scheduler.step(noise_prediction, timestep, latent, generator=rng).prev_sample # subtract the presdicted noise from latent
+            latent = torch.nan_to_num(latent, nan=0.0, posinf=4.0, neginf=-4.0) 
     finally:
         if hook_handles:
             hooks.detach(hook_handles)
 
-    frame_pixels = _decode(pipe, latents)
+    frame_pixels = _decode(pipe, latent)
     result = _postprocess(frame_pixels)
     _empty_cache(device)
 

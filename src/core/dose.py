@@ -1,5 +1,5 @@
 from __future__ import annotations
-from config import DoseConfig
+from .config import DoseConfig
 from math import exp
 
 

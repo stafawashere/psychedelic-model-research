@@ -1,9 +1,9 @@
 from __future__ import annotations
-from io import TextIOWrapper
 from dataclasses import dataclass, field, asdict
+from io import TextIOWrapper
 from typing import Literal
-import random
 import yaml
+import random
 
 
 GeometryArm = Literal["A_pure_emergence", "B_logpolar_bias"] #  test wether natural emergence mirrors biased emergence
@@ -25,13 +25,16 @@ class DoseConfig:
 
 @dataclass
 class KnobShaping:
-    scene_min: float = 0.15
-    scene_max: float = 0.85
+    scene_min: float = 0.15  # sensory precision floor, reached at peak; must stay > 0 so the scene can return
+    scene_max: float = 0.85  # sensory precision ceiling, at rest / baseline (docs use 1.0; equivalent here since recurrence≈0 at rest)
     prior_w_base: float = 7.5 # rebus prior
     prior_w_min: float = 1.0
     gain_slope: float = 1.5 # 1 + gain_slope * D
-    depth_shallow: int = 0 # blocks/layers in stable diffusion
-    depth_deep: int = 3
+    depth_shallow: int = 0 # flat hookable_blocks index: 0 = shallowest down_block
+    depth_deep: int = 4 # 4 = mid_block bottleneck (idx 0..3 down, 4 mid, 5..8 up); see note below
+    # NOTE: depth = round(lerp(shallow, deep, D)). The sampled dose peaks at D~=0.84, so with
+    # depth_deep=4 the knob rounds to 3 (last down_block) at peak and only reaches the mid_block
+    # if D >= 0.875. Bump to 5 (or sample a frame near t=peak_min) to guarantee mid is exercised.
     recurrence_min: float = 0.0
     recurrence_max: float = 0.6
 
@@ -49,7 +52,7 @@ class RunConfig:
     geometry_arm: GeometryArm = "A_pure_emergence"
     caption: str | None = None
     scene_path: str = "resources/scene.jpg"
-    out_dir: str = "runs/latest"
+    out_dir: str = "output/latest"
     dose: DoseConfig = field(default_factory=DoseConfig)
     knobs: KnobShaping = field(default_factory=KnobShaping)
 
@@ -74,7 +77,7 @@ class RunConfig:
         return RunConfig(
             model_id=data.get("model_id", "stable-diffusion-v1-5/stable-diffusion-v1-5"),
             device=data.get("device", "mps"),
-            dtype=data.get("dtype", "bfloat16"),
+            dtype=data.get("dtype", "float32"),
             scheduler=data.get("scheduler", "ddim"),
             height=data.get("height", 512),
             width=data.get("width", 512),
@@ -82,8 +85,8 @@ class RunConfig:
             seed=data.get("seed", 0),
             geometry_arm=data.get("geometry_arm", "A_pure_emergence"),
             caption=data.get("caption", None),
-            scene_path=data.get("scene_path", "scene.jpg"),
-            out_dir=data.get("out_dir", "runs/latest"),
+            scene_path=data.get("scene_path", "resources/scene.jpg"),
+            out_dir=data.get("out_dir", "output/latest"),
             dose=DoseConfig(**dose_cfg),
             knobs=KnobShaping(**knob_cfg),
         )
