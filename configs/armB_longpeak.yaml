@@ -1,0 +1,30 @@
+caption: null
+denoise_steps: 30
+device: mps
+dose:
+  dmax: 1.0
+  fall: 4.0
+  hold_min: 5.0
+  n_frames: 50
+  peak_min: 4.0
+  rise: 1.8
+  total_min: 16.0
+dtype: float32
+geometry_arm: B_logpolar_bias
+height: 512
+knobs:
+  depth_deep: 0
+  depth_shallow: 0
+  gain_slope: 1.6
+  prior_w_base: 7.5
+  prior_w_min: 1.0
+  recurrence_max: 0.42
+  recurrence_min: 0.0
+  scene_max: 0.85
+  scene_min: 0.4
+model_id: stable-diffusion-v1-5/stable-diffusion-v1-5
+out_dir: output/latest
+scene_path: resources/scene.jpg
+scheduler: ddim
+seed: 41769095
+width: 512

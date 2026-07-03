@@ -19,18 +19,15 @@ BLIP_MODEL = "Salesforce/blip-image-captioning-large"
 DENOISE_STEPS = 30 
 BIASED_WORDS = frozenset(
     {
-        # geometry / form constants
         "fractal", "fractals", "tunnel", "tunnels", "spiral", "spirals",
         "lattice", "lattices", "grid", "grids", "honeycomb", "tessellation",
         "tessellated", "kaleidoscope", "kaleidoscopic", "mandala", "mandalas",
         "geometry", "geometric", "geometrical", "symmetry", "symmetrical",
         "symmetric", "web", "webs", "mesh", "swirl", "swirls", "swirling",
         "vortex", "vortices", "spiraling", "spiralling", "checkerboard",
-        # entities / figures
         "being", "beings", "entity", "entities", "alien", "aliens", "creature",
         "creatures", "elf", "elves", "deity", "deities", "god", "gods", "angel",
         "angels", "demon", "demons", "spirit", "spirits", "figure", "figures",
-        # psychedelic vocabulary
         "psychedelic", "psychedelics", "dmt", "lsd", "trippy", "trip", "tripping",
         "hallucination", "hallucinations", "hallucinatory", "hallucinate",
         "hallucinating", "sacred", "cosmic", "mystical", "visionary", "ethereal",
@@ -158,6 +155,8 @@ def render_frame(
     *,
     steps: int = DENOISE_STEPS,
     logpolar: bool = False,
+    soft_clip: bool = False,
+    denoise_strength: float | None = None,
 ) -> Image.Image: # one frame: blend prev + scene in latent, denoise, decode to rgb
     device = getattr(pipe, "device", torch.device("cpu"))
     rng = torch.Generator(device="cpu").manual_seed(seed) # mps was being buggy so im gonna only use cpu for this change if ur device prefers it
@@ -181,7 +180,13 @@ def render_frame(
     del scene_pixels, prev_pixels, scene_latent, prev_latent
     _empty_cache(device)
 
-    denoise_strength = min(0.85, max(0.2, 0.2 + knobs.recurrence))
+    # default: recurrence sets how far back into noise we start (ceiling 0.85, validated path).
+    # explicit denoise_strength DECOUPLES noise-start from recurrence (lets recurrence stay a pure
+    # blend weight while we tune crystallization); capped 0.92 so we never under-denoise to NaN.
+    if denoise_strength is None:
+        denoise_strength = min(0.92, max(0.2, 0.2 + knobs.recurrence))
+    else:
+        denoise_strength = min(0.92, max(0.05, denoise_strength))
     pipe.scheduler.set_timesteps(steps, device=device)
 
     active_step_count = min(round(steps * denoise_strength), steps)
@@ -210,7 +215,7 @@ def render_frame(
 
     hook_handles: list = []
     if knobs.gain != 1.0:
-        hook_handles = hooks.attach(pipe.unet, knobs.depth, knobs.gain, logpolar) or []
+        hook_handles = hooks.attach(pipe.unet, knobs.depth, knobs.gain, logpolar, soft_clip) or []
 
     try:
         for timestep in denoise_timesteps:

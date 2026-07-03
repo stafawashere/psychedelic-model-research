@@ -17,6 +17,7 @@ class DoseConfig:
     dmax: float = 1.0
     total_min: float = 12.0
     n_frames: int = 11
+    hold_min: float = 0.0 
 
     def __post_init__(self):
         if self.rise <= 0 or self.fall <= 0:
@@ -32,11 +33,11 @@ class KnobShaping:
     gain_slope: float = 1.5 # 1 + gain_slope * D
     depth_shallow: int = 0 # flat hookable_blocks index: 0 = shallowest down_block
     depth_deep: int = 4 # 4 = mid_block bottleneck (idx 0..3 down, 4 mid, 5..8 up); see note below
-    # NOTE: depth = round(lerp(shallow, deep, D)). The sampled dose peaks at D~=0.84, so with
-    # depth_deep=4 the knob rounds to 3 (last down_block) at peak and only reaches the mid_block
-    # if D >= 0.875. Bump to 5 (or sample a frame near t=peak_min) to guarantee mid is exercised.
+    # NOTE: depth = round(lerp(shallow, deep, D))
     recurrence_min: float = 0.0
     recurrence_max: float = 0.6
+    ds_min: float = 0.0
+    ds_max: float = 0.0
 
 
 @dataclass

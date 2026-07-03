@@ -12,7 +12,11 @@ def dose(t_min: float, cfg: DoseConfig) -> float: # D(t) curve
         exponent = -time_until_peak / cfg.rise
         return cfg.dmax * exp(exponent)
 
-    time_since_peak = t_min - cfg.peak_min
+    hold = getattr(cfg, "hold_min", 0.0) 
+    if t_min <= cfg.peak_min + hold:
+        return cfg.dmax
+
+    time_since_peak = t_min - cfg.peak_min - hold
     exponent = -time_since_peak / cfg.fall
     return cfg.dmax * exp(exponent)
 
