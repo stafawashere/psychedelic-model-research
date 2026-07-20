@@ -43,7 +43,6 @@ def archive_existing(out_dir: str) -> None:
 def main(config_path: str | None = None) -> None:
     cfg = RunConfig.from_yaml(config_path) if config_path else RunConfig()
     arm_is_logpolar = cfg.geometry_arm == "B_logpolar_bias"  # arm B warps; arm A never does
-
     print(f"seed: {cfg.seed}  arm: {cfg.geometry_arm}")
 
     out_dir = cfg.out_dir
@@ -78,7 +77,7 @@ def main(config_path: str | None = None) -> None:
             f"gain={knobs.gain:.3f} depth={knobs.depth} recur={knobs.recurrence:.3f}"
             + (f" ds={ds:.3f}" if ds is not None else "")
         )
-        
+
         frame = engine.render_frame(
             pipe,
             scene,
