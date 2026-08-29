@@ -1,0 +1,32 @@
+caption: null
+denoise_steps: 30
+device: mps
+dose:
+  dmax: 1.0
+  fall: 3.0
+  hold_min: 0.0
+  n_frames: 40
+  peak_min: 4.0
+  rise: 1.8
+  total_min: 12.0
+dtype: float32
+geometry_arm: A_pure_emergence
+height: 512
+knobs:
+  depth_deep: 0
+  depth_shallow: 0
+  ds_max: 0.82
+  ds_min: 0.45
+  gain_slope: 4.0
+  prior_w_base: 12.0
+  prior_w_min: 6.0
+  recurrence_max: 0.12
+  recurrence_min: 0.0
+  scene_max: 0.85
+  scene_min: 0.4
+model_id: stable-diffusion-v1-5/stable-diffusion-v1-5
+out_dir: output/latest
+scene_path: resources/scene_rock.jpg
+scheduler: ddim
+seed: 0
+width: 512

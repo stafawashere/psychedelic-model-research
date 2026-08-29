@@ -26,7 +26,7 @@ knobs:
   scene_min: 0.4
 model_id: stable-diffusion-v1-5/stable-diffusion-v1-5
 out_dir: output/latest
-scene_path: resources/scene.jpg
+scene_path: resources/scene.png
 scheduler: ddim
 seed: 0
 width: 512

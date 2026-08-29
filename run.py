@@ -45,6 +45,16 @@ def main(config_path: str | None = None) -> None:
     arm_is_logpolar = cfg.geometry_arm == "B_logpolar_bias"  # arm B warps; arm A never does
     print(f"seed: {cfg.seed}  arm: {cfg.geometry_arm}")
 
+    schedule = map_dose(cfg.dose)
+    sampled_peak = max(d for _, d in schedule)
+    peak_frame = max(range(len(schedule)), key=lambda i: schedule[i][1])
+    if abs(sampled_peak - cfg.dose.dmax) > 1e-9:
+        raise SystemExit(
+            f"sampled peak {sampled_peak:.6f} < dmax {cfg.dose.dmax:.6f} "
+            f"(nearest frame {peak_frame} at t={schedule[peak_frame][0]:.3f}min) — "
+            "the schedule never lands on the apex; adjust n_frames or hold_min"
+        )
+
     out_dir = cfg.out_dir
     archive_existing(out_dir)
     frame_dir = os.path.join(out_dir, "frames")
@@ -52,18 +62,19 @@ def main(config_path: str | None = None) -> None:
     if not os.path.exists(cfg.scene_path):
         raise SystemExit(f"no scene image at {cfg.scene_path!r} — drop one there first")
 
-    cfg.to_yaml(os.path.join(out_dir, "config.yaml"))
-
     print("loading pipeline")
     pipe = engine.load_pipeline(cfg.model_id, cfg.device, cfg.dtype, cfg.scheduler)
 
     caption = cfg.caption if cfg.caption is not None else engine.caption_scene(cfg.scene_path)
     print(f"  caption: {caption!r}")
 
+    # snapshot the resolved config, caption included — it is the run's pre-registration
+    cfg.caption = caption
+    cfg.to_yaml(os.path.join(out_dir, "config.yaml"))
+
     scene = Image.open(cfg.scene_path).convert("RGB").resize((cfg.width, cfg.height))
     scene.save(os.path.join(out_dir, "scene.png"))
 
-    schedule = map_dose(cfg.dose)
     pad = len(str(len(schedule) - 1))
     decouple_ds = cfg.knobs.ds_max > 0.0
 
